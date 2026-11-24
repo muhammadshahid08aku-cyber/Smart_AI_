@@ -2,12 +2,32 @@
 import os
 
 
+def _choose(eps, has_image):
+    """Pick the endpoint that fits: image-to-video when an image is given, text-to-video otherwise."""
+    def score(n):
+        low, sc = n.lower(), 0
+        pnames = " ".join(p["parameter_name"].lower() for p in eps[n]["parameters"])
+        wants = ("image", "i2v") if has_image else ("text", "t2v", "prompt")
+        if any(w in low for w in wants):
+            sc += 3
+        if has_image and "image" in pnames:
+            sc += 2
+        if not has_image and "image" not in pnames:
+            sc += 2
+        if any(w in low for w in ("generate", "video", "infer", "t2v", "i2v", "run")):
+            sc += 1
+        if any(w in low for w in ("example", "clear", "reset", "update", "toggle", "load")):
+            sc -= 5
+        return sc
+    return max(eps, key=score)
+
+
 def call_space(space, prompt, api_name=None, image_path=None, extra=None, token=None):
     from gradio_client import Client, handle_file
     client = Client(space, token=token or os.environ.get("HF_TOKEN") or None)
     info = client.view_api(return_format="dict", print_info=False)
     eps = info["named_endpoints"]
-    name = api_name if api_name in eps else next(iter(eps))
+    name = api_name if api_name in eps else _choose(eps, bool(image_path))
     args = {}
     for p in eps[name]["parameters"]:
         n = p["parameter_name"]
