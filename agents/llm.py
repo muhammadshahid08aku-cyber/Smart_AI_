@@ -47,12 +47,14 @@ def pick_text(key):
     return ok[0]
 
 
-def pick_vision(key):
+def vision_candidates(key):
+    """Groq models that might accept images: known vision names first, then multimodal-capable families (qwen)."""
     ids = groq_models(key)
-    pref = [i for i in ids if any(t in i.lower() for t in ("scout", "maverick", "vision", "llama-4", "qwen3-vl", "-vl"))]
-    if not pref:
-        raise RuntimeError("Your Groq account lists no vision model right now. Models: " + ", ".join(ids[:15]))
-    return pref[0]
+    bad = ("whisper", "tts", "guard", "orpheus", "playai", "embed", "safeguard", "allam")
+    ids = [i for i in ids if not any(b in i.lower() for b in bad)]
+    first = [i for i in ids if any(t in i.lower() for t in ("scout", "maverick", "vision", "llama-4", "-vl", "vl-"))]
+    second = [i for i in ids if "qwen" in i.lower() and i not in first]
+    return first + second
 
 
 def _post(url, headers, payload, timeout=60):
@@ -82,16 +84,27 @@ def chat(system, user, json_mode=False, temperature=0.6):
 
 
 def vision(system, user, image_bytes, mime="image/jpeg"):
-    key = cfg("GROQ_API_KEY")
-    if not key:
-        raise RuntimeError("Image-to-prompt needs a free Groq key (console.groq.com/keys). Add GROQ_API_KEY.")
     b64 = base64.b64encode(image_bytes).decode()
-    msgs = [{"role": "system", "content": system},
-            {"role": "user", "content": [{"type": "text", "text": user},
-                                         {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}]}]
-    return _post(GROQ_URL, {"Authorization": f"Bearer {key}"},
-                 {"model": cfg("GROQ_VISION_MODEL") or pick_vision(key), "messages": msgs,
-                  "temperature": 0.4}, timeout=90)
+    content = [{"type": "text", "text": user}, {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}]
+    msgs = [{"role": "system", "content": system}, {"role": "user", "content": content}]
+    errors = []
+    key = cfg("GROQ_API_KEY")
+    if key:
+        try:
+            models = [cfg("GROQ_VISION_MODEL")] if cfg("GROQ_VISION_MODEL") else vision_candidates(key)
+        except Exception as e:
+            models, errors = [], [f"Groq model list: {e}"]
+        for m in models[:3]:
+            try:
+                return _post(GROQ_URL, {"Authorization": f"Bearer {key}"},
+                             {"model": m, "messages": msgs, "temperature": 0.4}, timeout=90)
+            except Exception as e:
+                errors.append(f"Groq {m}: {str(e)[:90]}")
+    try:  # free keyless fallback
+        return _post(POLL_URL, {}, {"model": "openai", "messages": msgs, "temperature": 0.4}, timeout=90)
+    except Exception as e:
+        errors.append(f"Pollinations vision: {str(e)[:90]}")
+    raise RuntimeError("No vision model worked. " + " | ".join(errors))
 
 
 def parse_json(text):
