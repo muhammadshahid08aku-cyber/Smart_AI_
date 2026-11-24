@@ -22,6 +22,17 @@ def _choose(eps, has_image):
     return max(eps, key=score)
 
 
+def _mode_value(p, has_image):
+    """Spaces like LTX have one endpoint with a mode dropdown: choose image-to-video or text-to-video."""
+    want = "image" if has_image else "text"
+    t = p.get("type") or {}
+    choices = (t.get("enum") if isinstance(t, dict) else None) or []
+    for c in choices:
+        if want in str(c).lower():
+            return c
+    return "image-to-video" if has_image else "text-to-video"
+
+
 def call_space(space, prompt, api_name=None, image_path=None, extra=None, token=None):
     from gradio_client import Client, handle_file
     client = Client(space, token=token or os.environ.get("HF_TOKEN") or None)
@@ -34,6 +45,8 @@ def call_space(space, prompt, api_name=None, image_path=None, extra=None, token=
         low = n.lower()
         if extra and n in extra:
             args[n] = extra[n]
+        elif "mode" in low and "prompt" not in low:
+            args[n] = _mode_value(p, bool(image_path))
         elif "negative" in low:
             args[n] = "blurry, low quality, distorted, watermark, text"
         elif "prompt" in low:
@@ -44,5 +57,9 @@ def call_space(space, prompt, api_name=None, image_path=None, extra=None, token=
             args[n] = p["parameter_default"]
         elif not p.get("parameter_has_default") and "image" in low:
             raise RuntimeError(f"{space} needs an input image")
-    out = client.predict(api_name=name, **args)
-    return out
+    try:
+        return client.predict(api_name=name, **args)
+    except Exception as e:
+        sent = {k: ("<file>" if "FileData" in repr(v) or "handle_file" in repr(v) or (isinstance(v, dict) and "path" in v) else str(v)[:30])
+                for k, v in args.items()}
+        raise RuntimeError(f"{str(e)[:150]} [endpoint {name}; sent {sent}; image given: {bool(image_path)}]") from e
