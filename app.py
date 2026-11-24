@@ -24,6 +24,8 @@ with st.sidebar:
     st.subheader("Setup status")
     st.write("Groq key (prompts + image-to-prompt):", "✅" if llm.cfg("GROQ_API_KEY") else "❌ add GROQ_API_KEY (free)")
     st.write("Hugging Face token (more free quota):", "✅" if llm.cfg("HF_TOKEN") else "optional")
+    from agents import video_agent as _va
+    st.caption("Build v4 | video spaces: " + ", ".join((llm.cfg("VIDEO_SPACES") or ",".join(_va.DEFAULT_SPACES)).split(",")))
     st.info("Free services have limits: small images, queues, daily quotas. Results are labelled as AI-generated.")
 
 
